@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Physics</title>
+
+  <style>
+
+    body {
+      background-color: black;
+    }
+
+  </style>
+
+</head>
+<body style='overflow: hidden;'>
+
+  <!-- <canvas id='imgui-canvas' width=1000 height=500 style="position: absolute;"></canvas> -->
+  <canvas id='myCanvas' width=1000 height=500></canvas>
+
+<script type="module">
+
+import { ImGui, BUTTON_SIZE } from "./imgui.js"
+
+// var c_imgui = document.getElementById("imgui-canvas");
+// let ctx_imgui = c_imgui.getContext("2d");
+var c = document.getElementById("myCanvas");
+let ctx = c.getContext("2d");
+
+let windowWidth = window.innerWidth;
+let windowHeight = window.innerHeight;
+
+c.height = windowHeight;
+c.width = windowWidth;
+
+let substeps = 6;
+let gravity = 2000;
+let k_coeff = 0.01;
+
+// [row, column]
+let grid = [];
+
+function addVector(vec1, vec2) {
+  return [vec1[0] + vec2[0], vec1[1] + vec2[1]]
+}
+
+function subVector(vec1, vec2) {
+  return [vec1[0] - vec2[0], vec1[1] - vec2[1]]
+}
+
+function mulVector(vec1, vec2) {
+  return [vec1[0] * vec2[0], vec1[1] * vec2[1]]
+}
+
+function divVector(vec1, vec2) {
+  return [vec1[0] / vec2[0], vec1[1] / vec2[1]]
+}
+
+function minVector(vec1, vec2) {
+  return [Math.min(vec1[0], vec2), Math.min(vec1[1], vec2)]
+}
+
+class ball {
+  constructor(x=windowWidth/2, y=windowHeight/2, rad=10, acc=[0,0], color="white") {
+    this.pos = [x,y];
+    this.old_pos = [x,y];
+    this.rad = rad;
+    this.color = color;
+    
+    this.vel = subVector(this.pos, this.old_pos);
+    this.maxVelocity = 10;
+    this.acc = acc;
+  }
+
+  applyGravity() {
+    this.acc = addVector(this.acc, [0,gravity]);
+  }
+
+  applyVelocity() {
+    this.vel = subVector(this.pos, this.old_pos);
+    
+    this.old_pos = this.pos;
+
+    var dt = ((1/120)/substeps)
+
+    var pos = this.pos;
+    this.pos = 
+    addVector( 
+      addVector(pos, this.vel),
+      mulVector(
+        this.acc,
+        [ dt*dt, dt*dt ]
+      )
+    );
+    // this.pos = ball.mulVector(this.pos, [.5,.5]);
+
+    // this.vel = ball.addVector(this.vel, this.acc);
+    this.acc = [0,0];
+    // this.vel = minVector(this.vel, this.maxVelocity);
+  }
+
+  applyConstraint(constraint) {
+    if (constraint.rad) {
+      var radius = constraint.rad;
+      var dist = (Math.sqrt(
+        Math.pow(constraint.x-this.pos[0],2)
+        +
+        Math.pow(constraint.y-this.pos[1],2)
+      ))
+
+      if (dist > radius - this.rad) {
+        var obj_vec = subVector([constraint.x, constraint.y], this.pos)
+
+        this.pos[0] = constraint.x - (obj_vec[0]/dist) * (radius - this.rad);
+        this.pos[1] = constraint.y - (obj_vec[1]/dist) * (radius - this.rad);
+      }
+    } else {
+      var min_x = constraint.x;
+      var max_x = constraint.width+constraint.x;
+      var min_y = constraint.y;
+      var max_y = constraint.height+constraint.y;
+
+      if (this.pos[0]-this.rad < min_x) {
+        this.pos[0] = (min_x - (this.pos[0]-min_x)) + this.rad*2;
+      }
+
+      if (this.pos[0]+this.rad > max_x) {
+        this.pos[0] = (max_x - (this.pos[0]-max_x)) - this.rad*2;
+      }
+
+      if (this.pos[1]-this.rad < min_y) {
+        this.pos[1] = (min_y - (this.pos[1]-min_y)) + this.rad*2;
+      }
+
+      if (this.pos[1]+this.rad > max_y) {
+        this.pos[1] = (max_y - (this.pos[1]-max_y)) - this.rad*2;
+      }
+
+
+    }
+  }
+
+  static applyCollisions(obj_1, obj_2) {
+    if (obj_1 == obj_2) return;
+    const dist1 = 
+      Math.pow(obj_1.pos[0] - obj_2.pos[0],2)
+      +
+      Math.pow(obj_1.pos[1] - obj_2.pos[1],2);
+
+    if (dist1 < (obj_1.rad+obj_2.rad)*(obj_1.rad+obj_2.rad) ) {
+      var dist2 = Math.sqrt(dist1);
+      const collisionVec = subVector(obj_1.pos, obj_2.pos);
+      const n = [collisionVec[0]/dist2, collisionVec[1]/dist2]
+      const delta = obj_1.rad+obj_2.rad-dist2;
+      // const coeff = 0.01;
+      // replaced by k_coeff
+      const n_delta = [0.5*k_coeff*delta, 0.5*k_coeff*delta]
+
+      obj_1.pos = addVector( obj_1.pos, mulVector(n_delta,n) );
+      obj_2.pos = subVector( obj_2.pos, mulVector(n_delta,n) );
+    }
+
+  }
+
+  static checkCollisions(ballArray) {
+
+    // check all around then inside (index 4)
+
+    // const center = ballArray[4];
+
+    // for (var ballCenter of center) {
+    //   for (var grid_cell of ballArray) {
+    //     if (grid_cell.length > 0) {
+    //       this.applyCollisions(ballCenter, ballInstance)
+    //     }
+    //   }
+    // } 
+
+    for (let i = 0; i < ballArray.length; i++) {
+
+      if (ballArray[i].length > 0 && ballArray[4].length > 0) {
+        
+        for (var obj_1 of ballArray[4]) {
+          for (var obj_2 of ballArray[i]) {
+            ball.applyCollisions(obj_1, obj_2)
+          } 
+        }
+
+      }
+
+    } 
+
+    // if (ballArray[i].length > 0 && ballArray[4][j]) {
+    //   this.applyCollisions(ballArray[4][j], ballArray[i][j])
+    // }
+
+    // if (ballArray.length > 1) {
+    //   for (let i = 0; i < ballArray.length; i++) {
+    //     for (let j = i + 1; j < ballArray.length; j++) {
+    //       this.applyCollisions(ballArray[i], ballArray[j])
+    //     }
+    //   }
+    // }
+
+  }
+
+  static checkGrid(grid) {
+    for (var y = 0; y<grid.length; y++) {
+      for (var x = 0; x<grid[y].length; x++) {
+        if (grid[y][x].length > 0) {
+          var balls = [
+            grid[y-1][x-1], grid[y-1][x], grid[y-1][x+1],
+            grid[y  ][x-1], grid[y  ][x], grid[y  ][x+1],
+            grid[y+1][x-1], grid[y+1][x], grid[y+1][x+1]
+          ]
+          // var balls = grid[y][x];
+          ball.checkCollisions(balls);
+        }
+      }
+    }
+  }
+
+  updatePosition() {
+    this.pos = addVector(this.pos, this.vel);
+  }
+
+  update(grid, constraintObj) {
+    this.applyGravity();
+    this.applyConstraint(constraintObj);
+    // this.applyCollisions(grid);
+    // this.checkGrid(grid);
+    this.applyVelocity();
+  }
+
+  draw() {
+    ctx.beginPath();
+    ctx.fillStyle = this.color;
+    ctx.arc(this.pos[0], this.pos[1], this.rad, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
+class constraint {
+  constructor(x=windowWidth/2-windowWidth/4, y=windowHeight/2-windowHeight/4, rad, w, h) {
+    this.x = x;
+    this.y = y;
+
+    this.color = "white";
+
+    if (rad) {
+      this.rad = rad;
+    } else {
+      this.width = w;
+      this.height = h;
+    }
+  }
+
+  draw() {
+    ctx.strokeStyle = this.color;
+    if (this.rad) {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.rad, 0, 2 * Math.PI);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.strokeRect(this.x, this.y, this.width, this.height);
+    }
+  }
+}
+
+let balls = 10;
+let ballArray = [];
+
+function make_ball(x,y,rad,acc,color) {
+  ballArray.push(
+    // x=windowWidth/2, y=windowHeight/2, rad=10, acc=[0,0], color="white"
+    new ball(
+      x,y,rad,acc,color
+    )
+  )
+}
+
+
+// for (var i = 0; i<balls; i++) {
+var interval = setInterval(() => {
+  // ball(x?: number, y?: number, rad?: number, acc?: number[], color?: string)
+  
+  // make_ball(
+  //   windowWidth/4+50, windowHeight/2-100, 
+  //   // Math.random()*1, 
+  //   4,
+  //   // [ (Math.sin(ballArray.length/balls) * Math.PI) * -1_000_000 + 1_500_000 , -1000000], 
+  //   // [1_000_000, 0],
+  //   [1_000_000, 0],
+  //   // "#" + Math.floor(Math.random()*16777215).toString(16)
+  //   `rgb(
+  //     0
+  //     ${Math.random()*131}
+  //     ${Math.random()*85+170}
+  //   )`
+  // );
+
+  make_ball(
+    windowWidth/4+50, windowHeight*7.25/10, 
+    // Math.random()*2, 
+    4,
+    [450_000, 0],
+    `rgb(
+      0
+      ${Math.random()*131}
+      ${Math.random()*85+170}
+    )`
+  );
+
+  if (ballArray.length >= balls) clearInterval(interval);
+}, 10);
+// }
+
+
+// const constraintObj = new constraint(windowWidth/2, windowHeight/2, 300, windowWidth/2, windowHeight/2)
+const constraintObj = new constraint(windowWidth/4, windowHeight/4, false, windowWidth/2, windowHeight/2)
+
+let grid_size = 20;
+// let grid_size = constraintObj.height/8;
+
+
+function initGrid() {
+  // Clear grid
+  grid = [];
+
+  // Make grid screen size
+  for (var y = 0; y < Math.floor( constraintObj.height/grid_size +5 ); y++) {
+    grid[y] = new Array( Math.floor(constraintObj.width/grid_size+5) );
+    for (var x = 0; x < Math.floor(constraintObj.width/grid_size +5); x++) {
+      grid[y][x] = [];
+    }
+  }
+
+  // Populate grid
+  if (ballArray.length > 0) {
+    for (var inst of ballArray) {
+      var grid_x = Math.floor( (inst.pos[0] - constraintObj.x) / grid_size + 2 );
+      var grid_y = Math.floor( (inst.pos[1] - constraintObj.y) / grid_size + 2  );
+  
+      // if (!grid[grid_x]) grid[grid_x] = [];
+      grid[grid_y][grid_x].push(inst);
+    }
+  }
+
+  // Draw grid
+  var draw = false;
+  var draw_all = false;
+  if (draw) {
+    for (var gridCellY in grid) {
+      for (var gridCellX in grid[gridCellY]) {
+        if (grid[gridCellY][gridCellX].length > 0 && !draw_all) {
+          ctx.beginPath();
+          ctx.strokeRect(
+          constraintObj.x - grid_size*2 + gridCellX*grid_size, 
+          constraintObj.y - grid_size*2 + gridCellY*grid_size, 
+          grid_size, grid_size);
+        } else if (draw_all) {
+          ctx.beginPath();
+          ctx.strokeRect(
+          constraintObj.x - grid_size*2 + gridCellX*grid_size, 
+          constraintObj.y - grid_size*2 + gridCellY*grid_size, 
+          grid_size, grid_size);
+        }
+      }
+    }
+  }
+
+
+}
+
+let imgui = new ImGui(50, 50, 400, 100);
+// let checkbox = imgui.checkbox("Test", true);
+
+var load_data = localStorage.getItem("config")
+
+if (!load_data) {
+  localStorage.setItem("config", JSON.stringify(
+    {
+      "balls" : 150,
+      "substeps" : 4,
+      "gravity" : 2000,
+      "grid_size" : 15
+    }
+  ))
+} else {
+  balls = JSON.parse(load_data).balls;
+  substeps = JSON.parse(load_data).substeps;
+  gravity = JSON.parse(load_data).gravity;
+  grid_size = parseInt(JSON.parse(load_data).grid_size);
+}
+
+let ball_count_slider = imgui.slider(
+  0, 5000, undefined, balls, {text:"Ball Count"});
+let substeps_slider = imgui.slider(
+  1, 10, undefined, substeps, {text:"Substep Count"});
+let gravity_slider = imgui.slider(
+  (0), 10_000, undefined, gravity, {text:"Gravity Constant"});
+let grid_size_slider = imgui.slider(
+  9, 100, undefined, grid_size, {text:"Grid Size"});
+let k_coeff_slider = imgui.slider(
+  0.001, 1.000, undefined, k_coeff, {float:ImGui.SliderFlags.Float, text:"K-Coeff"});
+
+let save_changes_btn = imgui.button("Save Changes", true);
+let reset_btn = imgui.button("Reset Params", true);
+
+imgui.init();
+
+function frame() { 
+  ctx.clearRect(0, 0, c.width, c.height);
+  // ctx_imgui.clearRect(0, 0, c_imgui.width, c_imgui.height);
+  // ctx.fillStyle = "rgba(0,0,0,0.1)"
+  // ctx.fillRect(0,0, windowWidth, windowHeight)
+  
+  try {
+    initGrid();
+  }
+  catch {
+    localStorage.setItem("config", JSON.stringify(
+      {
+        "balls" : 150,
+        "substeps" : 4,
+        "gravity" : 2000,
+        "grid_size" : 15
+      }
+    ))
+    ball_count_slider.state = 150
+    substeps_slider.state = 4
+    gravity_slider.state = 2000
+    grid_size_slider.state = 15
+    imgui.refresh()
+  }
+  for (var i = 0; i < substeps; i++) {
+    // this.checkGrid(grid);
+    for (var ballInstance of ballArray) {
+      ballInstance.update(grid, constraintObj);
+      ballInstance.draw();
+    }
+    ball.checkGrid(grid);
+  }
+  
+  if (save_changes_btn.state) {
+    localStorage.setItem("config", JSON.stringify(
+    {
+      "balls" : ball_count_slider.state,
+      "substeps" : substeps_slider.state,
+      "gravity" : gravity_slider.state,
+      "grid_size" : parseInt(grid_size_slider.state)
+    }
+    ));
+
+    balls = ball_count_slider.state;
+    substeps = substeps_slider.state;
+    gravity = gravity_slider.state;
+    grid_size = parseInt(grid_size_slider.state);
+    k_coeff = k_coeff_slider.state;
+
+  }
+
+  if (reset_btn.state) {
+    localStorage.setItem("config", JSON.stringify(
+      {
+        "balls" : 150,
+        "substeps" : 4,
+        "gravity" : 2000,
+        "grid_size" : 15
+      }
+    ))
+    ball_count_slider.state = 150
+    substeps_slider.state = 4
+    gravity_slider.state = 2000
+    grid_size_slider.state = 15
+    k_coeff_slider.state = 0.001
+
+    balls = ball_count_slider.state;
+    substeps = substeps_slider.state;
+    gravity = gravity_slider.state;
+    grid_size = parseInt(grid_size_slider.state);
+    k_coeff = k_coeff_slider.state;
+
+    imgui.refresh()
+  }
+
+  constraintObj.draw();
+  imgui.draw();
+}
+
+setInterval(frame,10)
+// window.requestAnimationFrame(frame)
+
+</script>
+
+</body>
+</html>
